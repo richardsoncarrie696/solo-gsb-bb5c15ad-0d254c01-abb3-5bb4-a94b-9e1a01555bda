@@ -1,4 +1,8 @@
+import random
+import re
 import unittest
+
+import stitch_parser
 
 from stitch_parser import (
     PREVIEW_PAGE_SIZE,
@@ -177,6 +181,100 @@ class TestParseRowStitchCounts(unittest.TestCase):
             parse_row_stitch_counts('ssk', 1)
 
 
+_SITE_RE = re.compile(r'\*\s*(?:\d+|\{[0-9|\s]+\})')
+
+
+def _random_row(rng, num_sizes):
+    """随机生成一条合法指令（嵌套不超过两层，倍数 1~5）。"""
+    def maybe_repeat():
+        r = rng.random()
+        if r < 0.5:
+            return ''
+        if r < 0.75:
+            return '*{}'.format(rng.randint(1, 5))
+        return '*{' + '|'.join(str(rng.randint(1, 5))
+                               for _ in range(num_sizes)) + '}'
+
+    def seq(depth):
+        parts = []
+        for _ in range(rng.randint(1, 3)):
+            if depth < 2 and rng.random() < 0.4:
+                parts.append('(' + seq(depth + 1) + ')' + maybe_repeat())
+            else:
+                parts.append(rng.choice(['k', 'p', 'yo', 'k2tog'])
+                             + maybe_repeat())
+        return ' '.join(parts)
+
+    return seq(0)
+
+
+def _reference_suggest_row_fix(text, availables):
+    """参照实现：优化前的做法——每个倍数位置替换为 *1、*2 后重新解析整行，
+    用两次试算推出“基数 + 系数 × 倍数”，再对胜出候选重解析校验。"""
+    num_sizes = len(availables)
+    try:
+        parse_row_details(text, num_sizes)
+    except ParseError:
+        return None
+    best = None
+    for m in _SITE_RE.finditer(text):
+        star_pos, end = m.start(), m.end()
+        body = m.group()[1:].strip()
+        if body.startswith('{'):
+            current = [int(v) for v in body[1:-1].split('|')]
+        else:
+            current = [int(body)] * num_sizes
+        c1 = parse_row_sizes(text[:star_pos] + '*1' + text[end:], num_sizes)[0]
+        c2 = parse_row_sizes(text[:star_pos] + '*2' + text[end:], num_sizes)[0]
+        new_values = []
+        changed = 0
+        delta = 0
+        feasible = True
+        for i in range(num_sizes):
+            coeff = c2[i] - c1[i]
+            base = c1[i] - coeff
+            target = availables[i]
+            if target is None:
+                new = current[i]
+            elif coeff == 0:
+                if base != target:
+                    feasible = False
+                    break
+                new = current[i]
+            else:
+                rest = target - base
+                if rest <= 0 or rest % coeff != 0:
+                    feasible = False
+                    break
+                new = rest // coeff
+            new_values.append(new)
+            if new != current[i]:
+                changed += 1
+                delta += abs(new - current[i])
+        if not feasible or changed == 0:
+            continue
+        if all(v == new_values[0] for v in new_values):
+            replacement = '*{}'.format(new_values[0])
+        else:
+            replacement = '*{' + '|'.join(str(v) for v in new_values) + '}'
+        new_text = text[:star_pos] + replacement + text[end:]
+        consumes, produces = parse_row_sizes(new_text, num_sizes)
+        if any(availables[i] is not None and consumes[i] != availables[i]
+               for i in range(num_sizes)):
+            continue
+        candidate = {
+            'char': star_pos + 1,
+            'old': text[star_pos:end],
+            'new': replacement,
+            'instruction': new_text,
+            'produces': produces,
+        }
+        key = (changed, delta, star_pos)
+        if best is None or key < best[0]:
+            best = (key, candidate)
+    return best[1] if best is not None else None
+
+
 class TestSuggestRowFix(unittest.TestCase):
     def test_size_repeat_single_item_fix(self):
         # L 需要 10 而非 9；S/M 原本正确，不能受影响
@@ -246,6 +344,67 @@ class TestSuggestRowFix(unittest.TestCase):
     def test_huge_multiplier_not_expanded(self):
         sug = suggest_row_fix('(k yo)*1000000000', [1000000001])
         self.assertEqual(sug['instruction'], '(k yo)*1000000001')
+
+    def test_nested_size_repeat_coefficients(self):
+        # 内层 k*{2|3} 的系数含外层 *2：各尺码分别 +2；可用 6/8 时改为 *{3|4}
+        sug = suggest_row_fix('(k*{2|3} yo)*2', [6, 8])
+        self.assertEqual(sug['instruction'], '(k*{3|4} yo)*2')
+        self.assertEqual(sug['old'], '*{2|3}')
+        self.assertEqual(sug['new'], '*{3|4}')
+        self.assertEqual(sug['produces'], [8, 10])
+
+    def test_parses_row_only_once(self):
+        # 候选求值不得重新解析整行：整个建议过程只分词/解析一次
+        tokenized = []
+        real_tokenize = stitch_parser._tokenize
+        stitch_parser._tokenize = lambda t: (tokenized.append(t),
+                                             real_tokenize(t))[1]
+        try:
+            sug = suggest_row_fix('(k2tog yo)*{6|8|9} k*3 (p yo)*2',
+                                  [19, 23, 27])
+        finally:
+            stitch_parser._tokenize = real_tokenize
+        self.assertEqual(len(tokenized), 1)
+        self.assertEqual(sug['instruction'], '(k2tog yo)*{7|9|11} k*3 (p yo)*2')
+        self.assertEqual(sug['produces'], [21, 25, 29])
+
+    def test_many_sites_long_row(self):
+        # 一行 2000 处倍数：单次解析 + 逐位置算术求值，取原文最靠前的候选
+        text = ' '.join(['k*2'] * 2000)
+        sug = suggest_row_fix(text, [4001])
+        self.assertEqual(sug['char'], 2)
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['instruction'],
+                         'k*3 ' + ' '.join(['k*2'] * 1999))
+        self.assertEqual(sug['produces'], [4001])
+
+    def test_matches_reparse_reference(self):
+        # 与“每处倍数替换为 *1/*2 重解析整行”的参照实现逐案对照
+        rng = random.Random(20260926)
+        for num_sizes in (1, 2, 3):
+            for _ in range(300):
+                text = _random_row(rng, num_sizes)
+                consumes, _ = parse_row_sizes(text, num_sizes)
+                availables = []
+                for c in consumes:
+                    r = rng.random()
+                    if r < 0.25:
+                        availables.append(None)      # 已停止推算的尺码
+                    elif r < 0.6:
+                        availables.append(c)         # 原本正确的尺码
+                    else:
+                        availables.append(max(1, c + rng.randint(-3, 3)))
+                got = suggest_row_fix(text, availables)
+                want = _reference_suggest_row_fix(text, availables)
+                self.assertEqual(got, want, msg=(text, availables))
+                if got is not None:
+                    # 建议应用后：参与约束的尺码消耗恰好等于可用针数
+                    new_c, _ = parse_row_sizes(got['instruction'], num_sizes)
+                    for i in range(num_sizes):
+                        if availables[i] is not None:
+                            self.assertEqual(new_c[i], availables[i],
+                                             msg=(text, availables))
 
 
 class TestReorderSizeMultipliers(unittest.TestCase):

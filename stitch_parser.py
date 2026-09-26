@@ -17,9 +17,12 @@
 用量按“记号次数 × 单记号克重”累计。
 
 suggest_row_fix 为“可解析但至少一个尺码针数不符”的行推导修正建议：整行
-消耗关于任何一个倍数都是线性的，用 *1、*2 两次试算即可推出“基数 + 系数
-× 倍数”（嵌套重复同样只做算术推导，不展开），进而解出让各尺码消耗恰好
-等于可用针数的正整数倍数。
+只解析一次并保留每处倍数的原文区间；整行消耗关于任何一个倍数都是线性的，
+解析后在树上累计并向下传递外层倍数之积，即得每处倍数对各尺码消耗/产出的
+线性系数（“基数 + 系数 × 倍数”，嵌套重复同样只做算术推导，不展开），
+进而解出让各尺码消耗恰好等于可用针数的正整数倍数。候选求解与替换后的产出
+都由该线性关系直接推出，不再重新解析整行；解析与全部候选求值的工作量随
+原文长度与尺码数的乘积线性增长。
 
 reorder_size_multipliers 在尺码顺序调整（上移/下移）时，按新顺序重排一行
 中所有 *{a|b|...} 的倍数项：嵌套重复与同一行多处都会处理，普通 *n 与其他
@@ -101,23 +104,34 @@ PREVIEW_PAGE_SIZE = 50
 
 
 class _StitchNode(object):
-    """解析树中的单个记号节点：mults 为各尺码的重复倍数（长度 num_sizes）。"""
+    """解析树中的单个记号节点。
 
-    __slots__ = ('name', 'mults')
+    mults 为各尺码的重复倍数（长度 num_sizes）；inner_c/inner_p 为应用自身
+    倍数之前（单个记号）的各尺码消耗/产出针数；site 为倍数在原文中的区间
+    (star_pos, end)（无 '*' 时为 None）。后三者供修正建议做线性推导。
+    """
+
+    __slots__ = ('name', 'mults', 'inner_c', 'inner_p', 'site')
 
     def __init__(self, name, mults):
         self.name = name
         self.mults = mults
+        self.inner_c = None
+        self.inner_p = None
+        self.site = None
 
 
 class _GroupNode(object):
-    """括号序列节点：children 为括号内的节点，mults 为各尺码的重复倍数。"""
+    """括号序列节点：children 为括号内的节点，其余字段同 _StitchNode。"""
 
-    __slots__ = ('children', 'mults')
+    __slots__ = ('children', 'mults', 'inner_c', 'inner_p', 'site')
 
     def __init__(self, children, mults):
         self.children = children
         self.mults = mults
+        self.inner_c = None
+        self.inner_p = None
+        self.site = None
 
 
 def _tokenize(text):
@@ -153,7 +167,8 @@ class _Parser(object):
 
         返回 (consumes, produces, tallies, nodes)：consumes/produces 为长度
         num_sizes 的针数列表；tallies 为 {记号名: 长度 num_sizes 的次数列表}；
-        nodes 为顶层节点列表（_StitchNode/_GroupNode），供针位预览定位，
+        nodes 为顶层节点列表（_StitchNode/_GroupNode，含倍数原文区间与单副本
+        消耗/产出），供针位预览定位与修正建议的线性系数推导使用，
         与算术累计来自同一条解析路径，故两者的语法检查完全一致。
         """
         c, p, tallies, nodes = self.parse_sequence()
@@ -213,10 +228,13 @@ class _Parser(object):
                     "括号内出现意外的记号 {!r}（第 {} 个字符）".format(tok[1], tok[2] + 1), tok[2])
             self.advance()
             node = _GroupNode(children, [1] * self.num_sizes)
+        # 应用自身倍数之前（单个副本）的消耗/产出，供修正建议求线性系数
+        node.inner_c = c
+        node.inner_p = p
         tok = self.peek()
         if tok is not None and tok[0] == 'STAR':
             self.advance()
-            mults = self.parse_repeat(tok)
+            mults, node.site = self.parse_repeat(tok)
             c = [cv * m for cv, m in zip(c, mults)]
             p = [pv * m for pv, m in zip(p, mults)]
             tallies = {
@@ -227,9 +245,12 @@ class _Parser(object):
         return c, p, tallies, node
 
     def parse_repeat(self, star_tok):
-        """repeat := NUM | '{' NUM ('|' NUM)* '}'，返回长度 num_sizes 的倍数列表。
+        """repeat := NUM | '{' NUM ('|' NUM)* '}'。
 
-        普通 *n 对所有尺码生效；*{a|b|c} 按尺码顺序分别取值，项数必须等于尺码数。
+        返回 (mults, (star_pos, end))：mults 为长度 num_sizes 的倍数列表
+        （普通 *n 对所有尺码生效；*{a|b|c} 按尺码顺序分别取值，项数必须等于
+        尺码数）；star_pos 为 '*' 在原文中的下标，end 为整个倍数文本（从 '*'
+        起）的结束下标（开区间），供修正建议定位替换原文。
         """
         star_pos = star_tok[2]
         tok = self.peek()
@@ -238,7 +259,8 @@ class _Parser(object):
                 "'*' 后必须跟正整数倍数（第 {} 个字符）".format(star_pos + 1), star_pos)
         if tok[0] == 'NUM':
             self.advance()
-            return [self._positive_num(tok)] * self.num_sizes
+            mults = [self._positive_num(tok)] * self.num_sizes
+            return mults, (star_pos, tok[2] + len(tok[1]))
         if tok[0] == 'LBRACE':
             self.advance()
             values = []
@@ -259,6 +281,7 @@ class _Parser(object):
                     continue
                 if sep is not None and sep[0] == 'RBRACE':
                     self.advance()
+                    end = sep[2] + 1
                     break
                 if sep is None:
                     raise ParseError(
@@ -270,7 +293,7 @@ class _Parser(object):
                 raise ParseError(
                     "尺码倍数项数不符：共 {} 个尺码，但倍数给出了 {} 个值（第 {} 个字符）".format(
                         self.num_sizes, len(values), star_pos + 1), star_pos)
-            return values
+            return values, (star_pos, end)
         raise ParseError(
             "'*' 后必须跟正整数倍数或按尺码的 '{{a|b|...}}'（第 {} 个字符）".format(tok[2] + 1), tok[2])
 
@@ -336,60 +359,39 @@ def parse_row(text):
     return consumes[0], produces[0]
 
 
-def _repeat_sites(text, num_sizes):
-    """列出行中每个倍数的位置与各尺码当前值（仅供已确认可解析的行使用）。
+def _collect_repeat_sites(nodes, outer, sites):
+    """按原文顺序收集每个倍数位置的信息与线性系数（不展开重复项）。
 
-    返回 [(star_pos, end, values), ...]：star_pos 为 '*' 在原文中的下标，
-    end 为整个倍数文本（从 '*' 起）的结束下标（开区间）；values 为长度
-    num_sizes 的各尺码当前倍数（普通 *n 展开为 num_sizes 个相同值）。
+    outer 为各尺码外层（祖先）倍数之积。每个带 '*' 的节点向 sites 追加
+    ((star_pos, end), current, coeff_c, coeff_p)：current 为各尺码当前
+    倍数；coeff_c/coeff_p 为整行消耗/产出对该倍数的线性系数，即
+    outer × 该节点单个副本的消耗/产出——整行消耗 = 基数 + 系数 × 该倍数。
+    括号内节点的倍数先于括号自身的倍数收集，与原文位置顺序一致。
     """
-    sites = []
-    tokens = _tokenize(text)
-    i = 0
-    while i < len(tokens):
-        kind, _val, pos = tokens[i]
-        if kind != 'STAR':
-            i += 1
-            continue
-        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
-        if nxt is not None and nxt[0] == 'NUM':
-            sites.append((pos, nxt[2] + len(nxt[1]), [int(nxt[1])] * num_sizes))
-            i += 2
-            continue
-        if nxt is not None and nxt[0] == 'LBRACE':
-            values = []
-            j = i + 1
-            while j < len(tokens) and tokens[j][0] != 'RBRACE':
-                if tokens[j][0] == 'NUM':
-                    values.append(int(tokens[j][1]))
-                j += 1
-            end = tokens[j][2] + 1 if j < len(tokens) else len(text)
-            sites.append((pos, end, values))
-            i = j + 1
-            continue
-        i += 1  # 孤立的 '*' 只出现在不可解析的行中，调用方已排除
-    return sites
+    for node in nodes:
+        if isinstance(node, _GroupNode):
+            inner = [o * m for o, m in zip(outer, node.mults)]
+            _collect_repeat_sites(node.children, inner, sites)
+        if node.site is not None:
+            coeff_c = [o * v for o, v in zip(outer, node.inner_c)]
+            coeff_p = [o * v for o, v in zip(outer, node.inner_p)]
+            sites.append((node.site, node.mults, coeff_c, coeff_p))
 
 
-def _try_multiplier_fix(text, site, availables, num_sizes):
-    """尝试仅改 site 处的一个倍数让各尺码消耗等于可用针数。
+def _try_multiplier_fix(site, consumes, availables, num_sizes):
+    """仅改 site 处的一个倍数，解出让各尺码消耗等于可用针数的新倍数。
 
-    成功返回 ((改动的尺码项数, 倍数变化总量, 原文位置), 候选 dict)，否则
-    返回 None。整行消耗关于该倍数是线性的：用 *1、*2 各试算一次即可推出
-    “基数 + 系数 × 倍数”，嵌套重复只参与算术推导，不展开。
+    成功返回 ((改动的尺码项数, 倍数变化总量, 原文位置), 各尺码新倍数)，
+    否则返回 None。纯算术求解：整行消耗关于该倍数是“基数 + 系数 × 倍数”，
+    基数由当前解析结果减去该倍数的贡献得到，不重新解析整行。
     """
-    star_pos, end, current = site
-    try:
-        c1 = parse_row_sizes(text[:star_pos] + '*1' + text[end:], num_sizes)[0]
-        c2 = parse_row_sizes(text[:star_pos] + '*2' + text[end:], num_sizes)[0]
-    except ParseError:
-        return None
+    (star_pos, _end), current, coeff_c, _coeff_p = site
     new_values = []
     changed = 0
     delta = 0
     for i in range(num_sizes):
-        coeff = c2[i] - c1[i]  # 该倍数每 +1，此尺码整行消耗的增量
-        base = c1[i] - coeff   # 行内其余部分的消耗
+        coeff = coeff_c[i]                     # 该倍数每 +1，此尺码整行消耗的增量
+        base = consumes[i] - coeff * current[i]  # 行内其余部分的消耗
         target = availables[i]
         if target is None:
             new = current[i]   # 已停止推算的尺码：保持原倍数
@@ -408,26 +410,7 @@ def _try_multiplier_fix(text, site, availables, num_sizes):
             delta += abs(new - current[i])
     if changed == 0:
         return None            # 没有实际改动
-    if all(v == new_values[0] for v in new_values):
-        replacement = '*{}'.format(new_values[0])
-    else:
-        replacement = '*{' + '|'.join(str(v) for v in new_values) + '}'
-    new_text = text[:star_pos] + replacement + text[end:]
-    try:
-        consumes, produces = parse_row_sizes(new_text, num_sizes)
-    except ParseError:
-        return None
-    for i in range(num_sizes):
-        if availables[i] is not None and consumes[i] != availables[i]:
-            return None
-    candidate = {
-        'char': star_pos + 1,  # '*' 的字符位置（从 1 计）
-        'old': text[star_pos:end],
-        'new': replacement,
-        'instruction': new_text,
-        'produces': produces,
-    }
-    return (changed, delta, star_pos), candidate
+    return (changed, delta, star_pos), new_values
 
 
 def suggest_row_fix(text, availables):
@@ -440,20 +423,50 @@ def suggest_row_fix(text, availables):
       {"char", "old", "new", "instruction", "produces"}
     各尺码新倍数相同时建议写作普通 *n，否则写作 *{a|b|c}。
     无解（或行本身不可解析）时返回 None。
+
+    整行只解析一次：解析时保留每处倍数的原文区间，并在树上累计、向下
+    传递外层倍数之积，得到每处倍数对各尺码消耗/产出的线性系数；候选
+    求解与替换后的产出都由该线性关系直接推出，不再重新解析整行，也不
+    展开重复项，总工作量随原文长度与尺码数的乘积线性增长。
     """
     num_sizes = len(availables)
     if num_sizes < 1:
         raise ValueError("availables 不能为空")
     try:
-        parse_row_details(text, num_sizes)
+        tokens = _tokenize(text)
+        if not tokens:
+            raise ParseError("该行没有有效指令")
+        consumes, produces, _tallies, nodes = \
+            _Parser(tokens, num_sizes).parse_row_with_nodes()
     except ParseError:
         return None
-    best = None
-    for site in _repeat_sites(text, num_sizes):
-        result = _try_multiplier_fix(text, site, availables, num_sizes)
+    best = None  # ((改动项数, 变化总量, 原文位置), site, 各尺码新倍数)
+    sites = []
+    _collect_repeat_sites(nodes, [1] * num_sizes, sites)
+    for site in sites:
+        result = _try_multiplier_fix(site, consumes, availables, num_sizes)
         if result is not None and (best is None or result[0] < best[0]):
-            best = result
-    return best[1] if best is not None else None
+            best = (result[0], site, result[1])
+    if best is None:
+        return None
+    _key, site, new_values = best
+    (star_pos, end), current, _coeff_c, coeff_p = site
+    if all(v == new_values[0] for v in new_values):
+        replacement = '*{}'.format(new_values[0])
+    else:
+        replacement = '*{' + '|'.join(str(v) for v in new_values) + '}'
+    # 替换后的各尺码产出同样按线性关系推出：原产出 + 系数 × 倍数变化量
+    new_produces = [
+        pv + coeff * (new - cur)
+        for pv, coeff, new, cur in zip(produces, coeff_p, new_values, current)
+    ]
+    return {
+        'char': star_pos + 1,  # '*' 的字符位置（从 1 计）
+        'old': text[star_pos:end],
+        'new': replacement,
+        'instruction': text[:star_pos] + replacement + text[end:],
+        'produces': new_produces,
+    }
 
 
 def reorder_size_multipliers(text, order):
