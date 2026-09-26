@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from stitch_parser import (
     PREVIEW_PAGE_SIZE,
@@ -246,6 +247,34 @@ class TestSuggestRowFix(unittest.TestCase):
     def test_huge_multiplier_not_expanded(self):
         sug = suggest_row_fix('(k yo)*1000000000', [1000000001])
         self.assertEqual(sug['instruction'], '(k yo)*1000000001')
+
+    def test_candidates_do_not_reparse_line(self):
+        # 候选求解不得重新解析整行：禁止一切“再解析”入口后推导仍正常
+        import stitch_parser
+        def boom(*args, **kwargs):
+            raise AssertionError('候选求解重新解析了整行')
+        with mock.patch.object(stitch_parser, 'parse_row_sizes', boom), \
+                mock.patch.object(stitch_parser, 'parse_row_details', boom), \
+                mock.patch.object(stitch_parser, 'parse_row', boom):
+            sug = suggest_row_fix('(k2tog yo)*{6|8|9} (yo)*5', [12, 16, 20])
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['instruction'], '(k2tog yo)*{6|8|10} (yo)*5')
+        self.assertEqual(sug['produces'], [17, 21, 25])
+
+    def test_many_sites_stay_linear(self):
+        # 上千个倍数位置也只解析一次：候选求值随原文长度线性增长，
+        # 若退回“每个位置重解析整行”的平方做法，此用例会慢几个数量级
+        text = ' '.join(['k*2'] * 1500)
+        sug = suggest_row_fix(text, [3001])
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['char'], 2)  # 首个倍数位置（变化总量最小且并列时取最前）
+        self.assertEqual(sug['produces'], [3001])
+
+    def test_many_sites_no_solution_stays_linear(self):
+        # 大量候选全部无解时同样不做整行重解析
+        text = ' '.join(['(k2tog)*2'] * 800)
+        self.assertIsNone(suggest_row_fix(text, [3201]))
 
 
 class TestReorderSizeMultipliers(unittest.TestCase):
