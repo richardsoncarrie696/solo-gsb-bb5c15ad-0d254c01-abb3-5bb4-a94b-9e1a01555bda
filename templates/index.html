@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>编织逐行针数校验与线材用量估算</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <h1>编织逐行针数校验与线材用量估算</h1>
+    <p class="hint">
+      支持记号：<code>k</code>（消耗1/产出1）、<code>p</code>（消耗1/产出1）、
+      <code>yo</code>（消耗0/产出1）、<code>k2tog</code>（消耗2/产出1），
+      以及可嵌套的 <code>(指令序列)*次数</code>，如 <code>((k yo)*2 k2tog)*3</code>。
+      多尺码倍数写作 <code>*{6|8|10}</code>：竖线分隔的正整数按尺码顺序分别取值，
+      项数须与尺码个数一致；普通 <code>*n</code> 对所有尺码生效，两种重复可互相嵌套。
+      记号可用空格或逗号分隔，大小写不敏感。
+    </p>
+    <p class="hint">
+      填写下方线材参数后，会按每个尺码每行各记号的实际次数（嵌套与按尺码重复均计入）
+      累计克重，并给出含损耗总量与向上取整的线团数；某尺码遇针数错误停止后续行时，
+      其用量标记为“部分估算”。
+    </p>
+    <p class="hint">
+      某行针数与可用针数不符时，会针对首个出错行尝试“仅改一个倍数”的修正建议
+      （改动的尺码项数最少、倍数变化最小者优先），建议显示在错误行的尺码卡片中，
+      可一键替换并重新校验。
+    </p>
+    <p class="hint">
+      用尺码行右侧的 <code>↑</code>/<code>↓</code> 按钮可上移、下移尺码：指令中每一处
+      <code>*{a|b|c}</code> 的倍数项会按新尺码顺序同步重排（嵌套重复、同一行多处均生效），
+      普通 <code>*n</code> 与其他原文不变；若某处按尺码倍数项数或数值不合法，整次移动不生效，
+      并提示原文行号与字符位置。
+    </p>
+    <p class="hint">
+      下方“单行针位预览”可选择图解原文行、尺码与起始操作序号，按所选尺码定位嵌套重复与
+      <code>*{a|b|c}</code> 倍数，逐针显示消耗的入针范围与产出的出针序号（每页最多 50 个，
+      可前后翻页、直接跳到首尾）；<code>yo</code> 等零入针针法会标明插入位置。重复段不展开，
+      十亿次重复也能直接查看尾段。
+    </p>
+    <p class="hint">
+      “跨行针位追踪”选择一个尺码与一枚起针序号后，按原文行号逐行列出这枚针在每个有效行
+      被哪种针法消耗、该操作的入针范围与产出针位：<code>k2tog</code> 会标明与相邻的哪一枚针
+      合并，<code>yo</code> 不消耗入针、只会把之后的产出位置推后。针数不符或语法错误时停在
+      首个错误行，此前轨迹保留并给出原文行号与字符位置。
+    </p>
+
+    <form id="check-form">
+      <div class="field">
+        <span>尺码与起针数（按顺序，<code>*{...}</code> 依此顺序取值）</span>
+        <div id="sizes-list"></div>
+        <div id="move-message" class="move-message" hidden></div>
+        <button type="button" id="add-size" class="small">＋ 添加尺码</button>
+      </div>
+
+      <label class="field">
+        <span>每行指令（一行一条，各尺码共用）</span>
+        <textarea id="pattern" rows="8" spellcheck="false"
+          placeholder="(k2tog yo)*{6|8|10}&#10;p*{12|16|20}&#10;(k2tog)*{6|8|10}"></textarea>
+      </label>
+
+      <fieldset class="field yarn-field">
+        <legend>线材用量参数（克）</legend>
+        <div id="yarn-list" class="yarn-grid">
+          <label class="yarn-item">
+            <span><code>k</code> 单记号克重</span>
+            <input type="number" id="yarn-k" min="0" step="0.1" value="0.5" required>
+          </label>
+          <label class="yarn-item">
+            <span><code>p</code> 单记号克重</span>
+            <input type="number" id="yarn-p" min="0" step="0.1" value="0.5" required>
+          </label>
+          <label class="yarn-item">
+            <span><code>yo</code> 单记号克重</span>
+            <input type="number" id="yarn-yo" min="0" step="0.1" value="0.2" required>
+          </label>
+          <label class="yarn-item">
+            <span><code>k2tog</code> 单记号克重</span>
+            <input type="number" id="yarn-k2tog" min="0" step="0.1" value="1.0" required>
+          </label>
+          <label class="yarn-item">
+            <span>损耗百分比（%）</span>
+            <input type="number" id="yarn-waste" min="0" step="1" value="10" required>
+          </label>
+          <label class="yarn-item">
+            <span>每团克重</span>
+            <input type="number" id="yarn-ball" min="0" step="1" value="50" required>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit">校验并估算用量</button>
+        <button type="button" id="fill-example">填入示例</button>
+      </div>
+    </form>
+
+    <section id="result" hidden>
+      <div id="summary"></div>
+      <div id="sizes-results" class="sizes-results"></div>
+    </section>
+
+    <section class="preview-section">
+      <h2>单行针位预览</h2>
+      <p class="hint">
+        选一条非空图解原文行与一个尺码，填起始操作序号后点“预览”：每页最多 50 个实际针法，
+        展示每个针法消耗的入针范围、产出的出针序号；<code>yo</code> 不消耗入针，显示其插入
+        位置。嵌套重复与按尺码倍数按所选尺码定位、整段跳过，不展开重复项。
+      </p>
+      <div class="preview-controls">
+        <label class="preview-item">
+          <span>图解原文行</span>
+          <select id="preview-line" size="6"></select>
+        </label>
+        <label class="preview-item">
+          <span>尺码</span>
+          <select id="preview-size" size="6"></select>
+        </label>
+        <label class="preview-item">
+          <span>起始操作序号</span>
+          <input type="number" id="preview-start" min="1" step="1" value="1">
+        </label>
+        <div class="preview-actions">
+          <button type="button" id="preview-go">预览</button>
+        </div>
+      </div>
+      <div id="preview-message" class="move-message" hidden></div>
+      <div id="preview-result" hidden>
+        <div id="preview-meta" class="preview-meta"></div>
+        <div class="preview-pager">
+          <button type="button" id="preview-first" class="small">« 首页</button>
+          <button type="button" id="preview-prev" class="small">‹ 上一页</button>
+          <span id="preview-page-info"></span>
+          <button type="button" id="preview-next" class="small">下一页 ›</button>
+          <button type="button" id="preview-last" class="small">尾页 »</button>
+          <label class="preview-jump">
+            跳到
+            <input type="number" id="preview-jump" min="1" step="1">
+            <button type="button" id="preview-jump-btn" class="small">Go</button>
+          </label>
+        </div>
+        <table id="preview-table">
+          <thead>
+            <tr>
+              <th>操作序号</th>
+              <th>针法</th>
+              <th>消耗入针</th>
+              <th>插入位置</th>
+              <th>产出出针</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="preview-section" id="track-section">
+      <h2>跨行针位追踪</h2>
+      <p class="hint">
+        选择一个尺码与该尺码起针中的一枚针序号（1 起），点“追踪”：按原文行号逐行列出这枚针
+        在每个有效行被哪种针法消耗、该操作的入针范围、与相邻针的合并及产出的针位。嵌套重复与
+        <code>*{a|b|c}</code> 按所选尺码算术定位，不展开重复项；起针序号越界明确报错，针数
+        不符或语法错误时停在首个错误行（语法错误给出字符位置），此前轨迹保留。
+      </p>
+      <div class="preview-controls">
+        <label class="preview-item">
+          <span>尺码</span>
+          <select id="track-size" size="4"></select>
+        </label>
+        <label class="preview-item">
+          <span>起针序号</span>
+          <input type="number" id="track-needle" min="1" step="1" value="1">
+        </label>
+        <div class="preview-actions">
+          <button type="button" id="track-go">追踪</button>
+        </div>
+      </div>
+      <div id="track-message" class="move-message" hidden></div>
+      <div id="track-result" hidden>
+        <div id="track-meta" class="preview-meta"></div>
+        <table id="track-table">
+          <thead>
+            <tr>
+              <th>原文行号</th>
+              <th>指令</th>
+              <th>本行入针序号</th>
+              <th>针法</th>
+              <th>该操作入针范围</th>
+              <th>合并相邻针</th>
+              <th>此前 yo</th>
+              <th>产出针位（下一行入针）</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="preview-section" id="layout-section">
+      <h2>多尺码对称花样排针</h2>
+      <p class="hint">
+        输入每10厘米针数、按从小到大排列的各尺码目标片幅、单侧边针数、中央针数、
+        花样宽度与允许宽差。每侧使用相同且至少一次的完整花样重复：
+        起针数 = 2×边针 + 中央针 + 2×花样宽度×单侧重复数，
+        实际片幅 = 起针数 × 10 ÷ 每10厘米针数。计算会为全部尺码选择严格递增的
+        单侧重复数，使各尺码实际片幅与目标差不超过允许宽差，并让宽差绝对值之和
+        最小（同分取按尺码顺序字典序最小的重复数组）；无可行组合时会说明无法
+        同时满足约束，并列出各尺码在允许宽差内的可行重复数范围。
+      </p>
+      <form id="layout-form">
+        <div class="layout-grid">
+          <label class="layout-item">
+            <span>每10厘米针数</span>
+            <input type="number" id="layout-gauge" min="0" step="0.1" value="22" required>
+          </label>
+          <label class="layout-item">
+            <span>单侧边针数</span>
+            <input type="number" id="layout-edge" min="0" step="1" value="2" required>
+          </label>
+          <label class="layout-item">
+            <span>中央针数</span>
+            <input type="number" id="layout-center" min="0" step="1" value="6" required>
+          </label>
+          <label class="layout-item">
+            <span>花样宽度（针）</span>
+            <input type="number" id="layout-pattern-width" min="1" step="1" value="8" required>
+          </label>
+          <label class="layout-item">
+            <span>允许宽差（厘米）</span>
+            <input type="number" id="layout-tolerance" min="0" step="0.1" value="1" required>
+          </label>
+        </div>
+
+        <div class="field">
+          <span>各尺码目标片幅（厘米，按从小到大排列）</span>
+          <div id="layout-sizes-list"></div>
+          <button type="button" id="layout-add-size" class="small">＋ 添加尺码</button>
+        </div>
+
+        <div class="actions">
+          <button type="submit">计算排针</button>
+          <button type="button" id="layout-fill-example">填入示例</button>
+        </div>
+      </form>
+      <div id="layout-message" class="move-message" hidden></div>
+      <section id="layout-result" hidden>
+        <div id="layout-meta" class="preview-meta"></div>
+        <div id="layout-table-wrap"></div>
+      </section>
+    </section>
+
+    <section class="preview-section" id="shaping-section">
+      <h2>对称减针行程</h2>
+      <p class="hint">
+        输入起针数、目标针数、总行数与每个减针行单侧最多减针数（1 或 2），逐行安排
+        左右相同的减针数：减针行之间至少隔一行平织，末行余针恰好等于目标针数。
+        在满足约束的方案中，让各行累计减针数与线性目标进度（总减针数×行号÷总行数）
+        的平方偏差之和最小，同分取逐行单侧减针数组字典序最小的方案；无解时会说明
+        最多可减针数及原因。
+      </p>
+      <form id="shaping-form">
+        <div class="layout-grid">
+          <label class="layout-item">
+            <span>起针数</span>
+            <input type="number" id="shaping-cast-on" min="1" step="1" value="70" required>
+          </label>
+          <label class="layout-item">
+            <span>目标针数（末行余针）</span>
+            <input type="number" id="shaping-target" min="1" step="1" value="40" required>
+          </label>
+          <label class="layout-item">
+            <span>总行数</span>
+            <input type="number" id="shaping-rows" min="1" step="1" value="15" required>
+          </label>
+          <label class="layout-item">
+            <span>每减针行单侧最多减针数</span>
+            <select id="shaping-max-decrease">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit">计算减针行程</button>
+          <button type="button" id="shaping-fill-example">填入示例</button>
+        </div>
+      </form>
+      <div id="shaping-message" class="move-message" hidden></div>
+      <section id="shaping-result" hidden>
+        <div id="shaping-meta" class="preview-meta"></div>
+        <div id="shaping-table-wrap"></div>
+      </section>
+    </section>
+
+    <section class="preview-section" id="stripe-section">
+      <h2>条纹用线排程</h2>
+      <p class="hint">
+        输入总行数（1~40），按顺序填写 2~3 种颜色的名称与各自可编织行数（库存），
+        再给出最短、最长条纹行数（1~6）与偏好段长。计算会把总行数切成连续条纹：
+        每段长度都在区间内、相邻两段必须异色、每种颜色总用量不超过其库存，并
+        <strong>恰好覆盖全部行</strong>；在可行方案中<strong>最小化各段长度与
+        偏好段长的绝对差之和</strong>，同分时按<strong>颜色输入顺序、段长
+        升序</strong>取段序列最靠前的方案。结果逐段列出起止行、颜色与用量，
+        并汇总各色余量；<strong>无解时明确提示原因，不返回部分安排</strong>。
+      </p>
+      <form id="stripe-form">
+        <div class="layout-grid">
+          <label class="layout-item">
+            <span>总行数（1~40）</span>
+            <input type="number" id="stripe-total-rows" min="1" max="40" step="1" value="20" required>
+          </label>
+          <label class="layout-item">
+            <span>最短条纹行数（1~6）</span>
+            <input type="number" id="stripe-min-len" min="1" max="6" step="1" value="2" required>
+          </label>
+          <label class="layout-item">
+            <span>最长条纹行数（1~6）</span>
+            <input type="number" id="stripe-max-len" min="1" max="6" step="1" value="4" required>
+          </label>
+          <label class="layout-item">
+            <span>偏好段长</span>
+            <input type="number" id="stripe-preferred" min="0" step="0.1" value="3" required>
+          </label>
+        </div>
+
+        <div class="field">
+          <span>颜色与可编织行数（按输入顺序，2~3 种，名称不可重复）</span>
+          <div id="stripe-colors-list"></div>
+          <button type="button" id="stripe-add-color" class="small">＋ 添加颜色</button>
+        </div>
+
+        <div class="actions">
+          <button type="submit">计算条纹排程</button>
+          <button type="button" id="stripe-fill-example">填入示例</button>
+        </div>
+      </form>
+      <div id="stripe-message" class="move-message" hidden></div>
+      <section id="stripe-result" hidden>
+        <div id="stripe-meta" class="preview-meta"></div>
+        <div id="stripe-colors-wrap"></div>
+        <div id="stripe-table-wrap"></div>
+      </section>
+    </section>
+
+    <section class="preview-section" id="seam-section">
+      <h2>缝合对位</h2>
+      <p class="hint">
+        输入 A、B 两片织物边缘各自的行数（1~60）与可选的标记对 <code>(a,b)</code>：
+        起点 <code>(0,0)</code> 与终点 <code>(A,B)</code> 自动作为标记，标记在两侧
+        均须严格递增。每次缝合从当前累计行号前进 <code>(1,1)</code>、<code>(1,2)</code>
+        或 <code>(2,1)</code>（该步 A/B 两侧各吃的行数），路径须<strong>经过全部标记
+        并恰好到达终点</strong>。计算以每个标记区间内两侧累计进度比例差的平方和最小
+        为目标，同分时按整条步进序列 <code>(1,1) ＜ (1,2) ＜ (2,1)</code> 的字典序
+        选解；结果逐步给出配对的行号范围与经过的标记。<strong>某一标记区间无法衔接
+        （区间两侧行数之比超过 2）时会指出该区间，不返回部分路线。</strong>
+      </p>
+      <form id="seam-form">
+        <div class="layout-grid">
+          <label class="layout-item">
+            <span>A 侧行数（1~60）</span>
+            <input type="number" id="seam-rows-a" min="1" max="60" step="1" value="8" required>
+          </label>
+          <label class="layout-item">
+            <span>B 侧行数（1~60）</span>
+            <input type="number" id="seam-rows-b" min="1" max="60" step="1" value="7" required>
+          </label>
+        </div>
+
+        <div class="field">
+          <span>标记对（可空；起点 (0,0)、终点 (A,B) 自动加入；按两侧行号都严格递增排列）</span>
+          <div id="seam-markers-list"></div>
+          <button type="button" id="seam-add-marker" class="small">＋ 添加标记</button>
+        </div>
+
+        <div class="actions">
+          <button type="submit">计算对位表</button>
+          <button type="button" id="seam-fill-example" class="small">示例 1：无标记直接对位</button>
+          <button type="button" id="seam-fill-example-marker" class="small">示例 2：带标记强制绕行</button>
+          <button type="button" id="seam-fill-example-fail" class="small">示例 3：无法衔接的区间</button>
+        </div>
+      </form>
+      <div id="seam-message" class="move-message" hidden></div>
+      <section id="seam-result" hidden>
+        <div id="seam-meta" class="preview-meta"></div>
+        <div id="seam-markers-wrap"></div>
+        <div id="seam-intervals-wrap"></div>
+        <div id="seam-table-wrap"></div>
+      </section>
+    </section>
+    <section class="preview-section" id="board-section">
+      <h2>定型板排片</h2>
+      <p class="hint">
+        输入定型板宽高、片间距与 2~6 片编织片的名称、宽高和是否允许旋转（尺寸均为
+        整数厘米）。排片按<strong>水平层</strong>排布：每层可放多片（层内按输入顺序
+        自左向右、顶端对齐），层高取本层最大片高；相邻片、相邻层均保留片间距，所有
+        片须完整落在板内。计算枚举全部分层与允许的 90° 旋转，求<strong>占用高度
+        最小</strong>的完整方案（同高时取层数最少，再取各片所属层序号字典序最小、
+        未旋转优先）。结果列出各片左上角坐标、最终朝向与占用高度；<strong>无解时
+        说明板宽或板高不足，不返回部分摆放</strong>。
+      </p>
+      <form id="board-form">
+        <div class="layout-grid">
+          <label class="layout-item">
+            <span>定型板宽（厘米）</span>
+            <input type="number" id="board-width" min="1" step="1" value="90" required>
+          </label>
+          <label class="layout-item">
+            <span>定型板高（厘米）</span>
+            <input type="number" id="board-height" min="1" step="1" value="60" required>
+          </label>
+          <label class="layout-item">
+            <span>片间距（厘米）</span>
+            <input type="number" id="board-gap" min="0" step="1" value="3" required>
+          </label>
+        </div>
+
+        <div class="field">
+          <span>编织片（2~6 片；同层片按此顺序自左向右排布）</span>
+          <div id="board-pieces-list"></div>
+          <button type="button" id="board-add-piece" class="small">＋ 添加编织片</button>
+        </div>
+
+        <div class="actions">
+          <button type="submit">计算排片</button>
+          <button type="button" id="board-fill-example" class="small">示例 1：基础排片</button>
+          <button type="button" id="board-fill-example-short" class="small">示例 2：板高不足</button>
+          <button type="button" id="board-fill-example-narrow" class="small">示例 3：板宽不足</button>
+        </div>
+      </form>
+      <div id="board-message" class="move-message" hidden></div>
+      <section id="board-result" hidden>
+        <div id="board-meta" class="preview-meta"></div>
+        <div id="board-layers-wrap"></div>
+        <div id="board-pieces-wrap"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

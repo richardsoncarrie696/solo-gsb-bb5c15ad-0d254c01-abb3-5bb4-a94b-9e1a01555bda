@@ -1,0 +1,684 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: #f6f4ef;
+  color: #333;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+
+.hint {
+  font-size: 0.9rem;
+  color: #666;
+  line-height: 1.7;
+}
+
+code {
+  background: #ece7da;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.field span {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+input[type="number"],
+input[type="text"],
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #c9c2b2;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: #fff;
+}
+
+input[type="number"] {
+  max-width: 160px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+button {
+  padding: 8px 22px;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  background: #7a6c5d;
+  color: #fff;
+}
+
+button[type="button"] {
+  background: #b0a48f;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+#result {
+  margin-top: 24px;
+}
+
+#summary {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  background: #ece7da;
+}
+
+#summary.ok {
+  background: #e0efdd;
+  color: #2e6b2e;
+}
+
+#summary.error,
+.error {
+  background: #f8e1e1;
+  color: #a33;
+}
+
+#error-box {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  padding: 8px 10px;
+  border: 1px solid #e2dccb;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+th {
+  background: #efe9db;
+}
+
+td:nth-child(2) {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* 尺码编辑列表 */
+#sizes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.size-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.size-row .size-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.size-row .size-cast-on {
+  width: 120px;
+}
+
+.remove-size {
+  padding: 8px 14px;
+  background: #b0a48f;
+  line-height: 1;
+}
+
+.move-size {
+  padding: 8px 12px;
+  background: #b0a48f;
+  line-height: 1;
+}
+
+.move-size:disabled,
+.remove-size:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 尺码上移/下移的结果或错误提示 */
+.move-message {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.move-message.ok {
+  background: #e0efdd;
+  color: #2e6b2e;
+}
+
+.move-message.error {
+  background: #f8e1e1;
+  color: #a33;
+}
+
+button.small {
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  background: #b0a48f;
+}
+
+/* 多尺码结果并排展示 */
+.sizes-results {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.size-card {
+  flex: 1 1 0;
+  min-width: 250px;
+  background: #fff;
+  border: 1px solid #e2dccb;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.size-card h2 {
+  font-size: 1.05rem;
+  margin: 0 0 10px;
+}
+
+.size-status {
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+}
+
+.size-status.ok {
+  background: #e0efdd;
+  color: #2e6b2e;
+}
+
+.size-status.error {
+  background: #f8e1e1;
+  color: #a33;
+}
+
+.size-error {
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* 错误行的倍数修正建议 */
+.suggestion-box {
+  background: #e9f2e4;
+  border: 1px solid #cbdec2;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+
+.suggestion-title {
+  font-weight: 600;
+  color: #2e6b2e;
+}
+
+.suggestion-text {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.apply-suggestion {
+  margin-top: 6px;
+  background: #6b8f5e;
+}
+
+/* 线材用量参数输入 */
+.yarn-field {
+  border: 1px solid #c9c2b2;
+  border-radius: 6px;
+  padding: 10px 14px 14px;
+  margin-bottom: 14px;
+}
+
+.yarn-field legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.yarn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 16px;
+}
+
+.yarn-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.yarn-item span {
+  font-size: 0.9rem;
+  margin-bottom: 0;
+}
+
+.yarn-item input[type="number"] {
+  width: 100%;
+  max-width: none;
+}
+
+/* 尺码卡片中的线材用量 */
+.yarn-box {
+  background: #f3efe4;
+  border: 1px solid #e2dccb;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+  line-height: 1.8;
+}
+
+.yarn-title {
+  font-weight: 600;
+}
+
+.yarn-partial {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #fbeed3;
+  color: #8a611c;
+  font-weight: 600;
+}
+
+/* 单行针位预览 */
+.preview-section {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 2px dashed #c9c2b2;
+}
+
+.preview-section h2 {
+  font-size: 1.2rem;
+}
+
+.preview-controls {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-item span {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.preview-item select {
+  width: 260px;
+  min-height: 120px;
+  padding: 6px 8px;
+  border: 1px solid #c9c2b2;
+  border-radius: 6px;
+  background: #fff;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.preview-item select option:disabled {
+  color: #a9a294;
+}
+
+.preview-item input[type="number"] {
+  width: 160px;
+  max-width: none;
+}
+
+.preview-actions {
+  padding-bottom: 2px;
+}
+
+.preview-meta {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin: 10px 0;
+  background: #ece7da;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  overflow-x: auto;
+}
+
+.preview-pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.preview-pager .small:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#preview-page-info {
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.preview-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  margin-left: auto;
+}
+
+.preview-jump input[type="number"] {
+  width: 110px;
+  max-width: none;
+  padding: 5px 8px;
+}
+
+.preview-jump .small {
+  padding: 5px 12px;
+}
+
+#preview-table td.preview-stitch {
+  font-weight: 600;
+}
+
+#preview-table .preview-zero {
+  color: #8a611c;
+}
+
+#preview-table tr.preview-yo td {
+  background: #fdf6e3;
+}
+
+#preview-table tr.preview-yo td.preview-stitch {
+  color: #8a611c;
+}
+
+/* 跨行针位追踪 */
+#track-table tr.track-k2tog td {
+  background: #f1ece0;
+}
+
+#track-table tr.track-k2tog td:nth-child(4) {
+  font-weight: 600;
+  color: #7a4a16;
+}
+
+#track-size {
+  width: 260px;
+  min-height: 96px;
+  padding: 6px 8px;
+  border: 1px solid #c9c2b2;
+  border-radius: 6px;
+  background: #fff;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+#track-needle {
+  width: 160px;
+  max-width: none;
+}
+
+/* 多尺码对称花样排针 */
+.layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.layout-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layout-item span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.layout-item input[type="number"] {
+  width: 100%;
+  max-width: none;
+}
+
+#layout-sizes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#layout-sizes-list .size-target {
+  width: 140px;
+}
+
+#layout-result {
+  margin-top: 14px;
+}
+
+#layout-table-wrap {
+  overflow-x: auto;
+}
+
+/* 对称减针行程 */
+#shaping-max-decrease {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #c9c2b2;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: #fff;
+}
+
+#shaping-result {
+  margin-top: 14px;
+}
+
+#shaping-table-wrap {
+  overflow-x: auto;
+}
+
+#shaping-table-wrap tr.shaping-decrease-row td {
+  background: #f1ece0;
+  font-weight: 600;
+}
+
+/* 条纹用线排程 */
+#stripe-colors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stripe-order {
+  width: 52px;
+  flex: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #6b5f50;
+}
+
+#stripe-colors-list .stripe-color-rows {
+  width: 150px;
+  max-width: none;
+}
+
+#stripe-result {
+  margin-top: 14px;
+}
+
+#stripe-colors-wrap {
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+
+#stripe-table-wrap {
+  overflow-x: auto;
+}
+
+/* 按颜色输入顺序区分条纹：循环使用三套底色（td:nth-child(2) 的全局
+   等宽字体规则会覆盖此处第二列背景，故各表第二列单独补上同色背景） */
+#stripe-table-wrap tr.stripe-color-0 td,
+#stripe-colors-wrap tr.stripe-color-0 td,
+#stripe-table-wrap tr.stripe-color-0 td:nth-child(4),
+#stripe-colors-wrap tr.stripe-color-0 td:nth-child(2) {
+  background: #f3efe4;
+}
+
+#stripe-table-wrap tr.stripe-color-1 td,
+#stripe-colors-wrap tr.stripe-color-1 td,
+#stripe-table-wrap tr.stripe-color-1 td:nth-child(4),
+#stripe-colors-wrap tr.stripe-color-1 td:nth-child(2) {
+  background: #e6ecef;
+}
+
+#stripe-table-wrap tr.stripe-color-2 td,
+#stripe-colors-wrap tr.stripe-color-2 td,
+#stripe-table-wrap tr.stripe-color-2 td:nth-child(4),
+#stripe-colors-wrap tr.stripe-color-2 td:nth-child(2) {
+  background: #f1e7ec;
+}
+
+/* 缝合对位 */
+#seam-markers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.seam-comma {
+  flex: none;
+  font-size: 0.95rem;
+  color: #6b5f50;
+}
+
+#seam-markers-list .seam-marker-a,
+#seam-markers-list .seam-marker-b {
+  width: 150px;
+  max-width: none;
+}
+
+#seam-result {
+  margin-top: 14px;
+}
+
+#seam-markers-wrap,
+#seam-intervals-wrap {
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+
+#seam-table-wrap {
+  overflow-x: auto;
+}
+
+#seam-table-wrap tr.seam-marker-land td {
+  background: #e9f2e4;
+  font-weight: 600;
+}
+
+#seam-markers-wrap tr.seam-marker-start td,
+#seam-markers-wrap tr.seam-marker-end td {
+  background: #f3efe4;
+}
+
+#seam-markers-wrap tr.seam-marker-mark td {
+  background: #e9f2e4;
+}
+
+/* 定型板排片 */
+#board-pieces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#board-pieces-list .board-piece-width,
+#board-pieces-list .board-piece-height {
+  width: 110px;
+  max-width: none;
+}
+
+.board-rotate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+#board-result {
+  margin-top: 14px;
+}
+
+#board-layers-wrap {
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+
+#board-pieces-wrap {
+  overflow-x: auto;
+}
